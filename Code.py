@@ -4,7 +4,9 @@ import time
 from utime import sleep
 import network
 import sys
-import umqtt.robust import MQTTClient
+import ssl
+import umqtt.robust
+import MQTTClient
 
 # Intitalize PIR sensor on GPIO 0
 pir = Pin(0, Pin.IN, Pin.PULL_DOWN)
@@ -56,6 +58,10 @@ else:
 broker = "74c55c98d0f9464492456f0fd3b17079.s1.eu.hivemq.cloud"
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT) 
 context.verify_mode = ssl.CERT_NONE
+
+topic_motion = b"iot/motion"    #Pico to App (counter value)
+topic_control = b"iot/control"  #App to Pico (RESET button)
+
 #Creating MQTT connection.Connection is using a testcredentials from HiveMQ.
 client = MQTTClient(
         client_id=b'hello', 
@@ -64,13 +70,37 @@ client = MQTTClient(
         user="iottestuser", 
         password="Abcd1234!", 
         ssl=context)
+
+# Callback function to handle incoming messages from app
+def sub_cb(topic, msg):
+    global counter
+    try:
+        command = msg.decode()
+    except:
+        command = str(msg)
+    print("Received command on {}: {}".format(topic, command))
+
+    # Handle RESET button command
+    if command == "RESET":
+        counter = 0
+        display.number(counter)
+        #Sending new value to broker
+        client.publish(topic_motion, b"0")        
+        print("Counter reset to 0")
+
+
+
+client.set_callback(sub_cb)
 #Connect to client
 client.connect()
+client.subscribe(topic_control)
+
 
 # create the buzzer. Place the Pin to GP16
 buzzer = Pin(16, Pin.OUT)
 
 while True:
+    client.check_msg()  # Check for new messages
     val  = pir.value() # read PIR sensor value
     current_time = time.time()
 
@@ -84,7 +114,8 @@ while True:
             display.number(counter)  # Update display with new counter value
             last_motion_time = current_time
             #Sending the data to broker
-            client.publish("iot/motion", "1")
+            msg = str(counter).encode()
+            client.publish(topic_motion, msg)
             #The buzzer will give a soundmark every 0.2s
             buzzer.value(1)
             time.sleep(0.2)
