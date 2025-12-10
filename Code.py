@@ -5,8 +5,7 @@ from utime import sleep
 import network
 import sys
 import ssl
-import umqtt.robust
-import MQTTClient
+from umqtt.robust import MQTTClient
 import config
 
 # Intitalize PIR sensor on GPIO 0
@@ -56,7 +55,7 @@ else:
 
 # Here we set up the MQTT-broker
 #This is the Hive-MQ address
-broker = "74c55c98d0f9464492456f0fd3b17079.s1.eu.hivemq.cloud"
+broker = config.MQTT_BROKER #"74c55c98d0f9464492456f0fd3b17079.s1.eu.hivemq.cloud"
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT) 
 context.verify_mode = ssl.CERT_NONE
 
