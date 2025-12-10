@@ -3,7 +3,7 @@ import tm1637 # for 4 digit 7-segment display(?)
 import time
 from utime import sleep
 import network
-import sys
+from sys import exit
 import ssl
 from umqtt.robust import MQTTClient
 import config
@@ -51,7 +51,7 @@ if wlan.isconnected():
     print(f"Congratulations WiFi connected succesfully!")
 else:
     print("Oh no!Failed to connect to the Wi-Fi!")
-    sys.exit()
+    exit()
 
 # Here we set up the MQTT-broker
 #This is the Hive-MQ address
