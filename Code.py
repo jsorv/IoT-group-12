@@ -7,6 +7,7 @@ import sys
 import ssl
 import umqtt.robust
 import MQTTClient
+import config
 
 # Intitalize PIR sensor on GPIO 0
 pir = Pin(0, Pin.IN, Pin.PULL_DOWN)
@@ -26,8 +27,8 @@ print("Ready")
 
 # initialise networking
 #Change here the correct Wi-Fi settings
-ssid = "change correct Wi-Fi name here" 
-password = "Add your Wi-Fi password here"
+ssid = config.ssid #"change correct Wi-Fi name here"
+password = config.pwd #"Add your Wi-Fi password here"
 
 # connect to wifi
 wlan = network.WLAN(network.STA_IF)
