@@ -10,7 +10,7 @@ from machine_i2c_lcd import I2cLcd  # Ensure you have this lib saved on Pico
 # --- CONFIGURATION ---
 CORRECT_PIN = "1995"  # <--- SET YOUR PASSWORD HERE
 DEBOUNCE_TIME = 3     # Seconds
-SERVO_OPEN_VAL = 8000 # Adjust for your servo (approx 90 degrees)
+SERVO_OPEN_VAL = 8000 # Adjust for your servo (approx 90 degrees) 
 SERVO_CLOSE_VAL = 2000 # Adjust for your servo (approx 0 degrees)
 
 # --- GLOBAL STATE VARIABLES ---
