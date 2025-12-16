@@ -31,7 +31,7 @@ buzzer = Pin(16, Pin.OUT)
 servo = PWM(Pin(15))
 servo.freq(50)
 
-# I2C LCD Setup
+# I2C LCD Setup (16x2 display at address 0x27)
 i2c = I2C(0, sda=Pin(8), scl=Pin(9), freq=400000)
 try:
     lcd = I2cLcd(i2c, 0x27, 2, 16)
@@ -42,6 +42,7 @@ except Exception as e:
 
 # --- HELPER FUNCTIONS ---
 def update_lcd(line1, line2=""):
+    """Display status on LCD"""
     if lcd:
         lcd.clear()
         lcd.putstr(line1)
@@ -49,7 +50,16 @@ def update_lcd(line1, line2=""):
             lcd.move_to(0, 1)
             lcd.putstr(line2)
 
+def servo_open():
+    """Unlock door"""
+    servo.duty_u16(SERVO_OPEN_VAL)
+
+def servo_close():
+    """Lock door"""
+    servo.duty_u16(SERVO_CLOSE_VAL)
+
 def access_granted():
+    """Handle successful PIN entry"""
     global failed_attempts, system_status
     print("ACCESS GRANTED")
     system_status = "Access Granted"
@@ -57,22 +67,23 @@ def access_granted():
     update_lcd("Access granted", "Welcome!")
     
     # Open Lock
-    servo.duty_u16(SERVO_OPEN_VAL)
+    servo_open()
     buzzer.value(1)
     time.sleep(0.2)
     buzzer.value(0)
     
     # Wait 5s then Lock
     time.sleep(5)
-    servo.duty_u16(SERVO_CLOSE_VAL)
+    servo_close()
     update_lcd("System armed")
     system_status = "Secure"
 
 def trigger_alarm():
+    """Handle intrusion alarm"""
     global system_status
     print("ALARM TRIGGERED")
     system_status = "ALARM ACTIVE"
-    update_lcd("ALARM!", "Intruder Alert")
+    update_lcd("ALARM!", "Intruder alert")
     
     # Alarm Beeps
     for _ in range(5):
@@ -83,6 +94,7 @@ def trigger_alarm():
 
 # --- MQTT CALLBACK ---
 def mqtt_callback(topic, msg):
+    """Process incoming MQTT control messages"""
     global failed_attempts, is_locked_out, visitor_count
     try:
         command = msg.decode().strip()
@@ -91,21 +103,25 @@ def mqtt_callback(topic, msg):
     
     print(f"MQTT RX: {command}")
 
+    # Admin unlock command
     if command == "UNLOCK":
         is_locked_out = False
         failed_attempts = 0
         update_lcd("Lockout cleared")
         return
 
+    # Ignore if locked out
     if is_locked_out:
         return
 
+    # Process PIN or special commands
     if command == CORRECT_PIN:
         access_granted()
     elif command == "RESET":
         visitor_count = 0
         update_lcd("Counter reset")
     else:
+        # Wrong PIN
         failed_attempts += 1
         print(f"Failed attempts: {failed_attempts}")
         if failed_attempts >= 3:
@@ -116,17 +132,20 @@ def mqtt_callback(topic, msg):
 
 # --- ASYNC TASKS ---
 async def wifi_connect():
+    """Connect to Wi-Fi network"""
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     wlan.connect(config.ssid, config.pwd)
     while not wlan.isconnected():
         await asyncio.sleep(1)
-    print(f"WiFi Connected: {wlan.ifconfig()[0]}")
-    update_lcd("WiFi Connected", wlan.ifconfig()[0])
+    ip = wlan.ifconfig()[0]
+    print(f"WiFi Connected: {ip}")
+    update_lcd("WiFi connected", ip)
     await asyncio.sleep(2)
     update_lcd("System armed")
 
 async def mqtt_loop(client):
+    """Poll MQTT for incoming control messages"""
     while True:
         try:
             client.check_msg()
@@ -135,6 +154,7 @@ async def mqtt_loop(client):
         await asyncio.sleep(0.1)
 
 async def sensor_loop(client):
+    """Poll PIR sensor and publish motion events"""
     global visitor_count, system_status
     last_trigger = 0
     while True:
@@ -149,6 +169,10 @@ async def sensor_loop(client):
                     client.publish(MQTT_TOPIC_MOTION, str(visitor_count).encode())
                 except:
                     pass
+                # Short beep for motion
+                buzzer.value(1)
+                time.sleep(0.1)
+                buzzer.value(0)
         await asyncio.sleep(0.1)
 
 # --- WEB SERVER ---
@@ -173,6 +197,7 @@ setInterval(function(){
 """
 
 async def web_server():
+    """Serve HTTP web dashboard"""
     addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
     s = socket.socket()
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -196,6 +221,7 @@ async def web_server():
 
 # --- MAIN ---
 async def main():
+    """Main entry point"""
     await wifi_connect()
     
     client_id = ubinascii.hexlify(unique_id())
