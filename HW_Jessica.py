@@ -8,6 +8,7 @@ import socket
 import ssl
 import sys
 
+
 # WIFI SETUP - CONNECTION
 ssid = config.ssid
 pwd = config.pwd
@@ -89,6 +90,7 @@ armed_mode = True       # waiting mode
 alert_mode = False      # intrusion active
 alert_start = 0
 motion_latched = False
+pir_counter = 0 #counter variable
 
 
 
@@ -102,21 +104,19 @@ lcd.backlight_off()
 status_char = "System Active"
 # generate html
 def generate_html(status):
-    html = f"""\
-    HTTP/1.1 200 OK
-    Content-Type: text/html
-
-    <!DOCTYPE html>
-    <html>
-      <head><title>Security alarm system</title></head>
-      <body>
-          <h1 style='color:red, text-align:center'>SECURITY ALARM SYSTEM</h1>
-          <h2>Status: {status}</h2>
-          <p>This is static content for now.</p>
-      </body>
-    </html>
-    """
+    html = f"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" + f"""\
+<!DOCTYPE html>
+<html>
+  <head><title>Security alarm system</title></head>
+  <body>
+      <h1 style='color:red; text-align:center'>SECURITY ALARM SYSTEM</h1>
+      <h2>Status: {status}</h2>
+      <p>This is static content for now.</p>
+  </body>
+</html>
+"""
     return str(html)
+
 
 try:
     while True:
@@ -137,6 +137,13 @@ try:
             alert_start = time()
             motion_latched = True
 
+            pir_counter +=1
+            mqtt_msg=str(pir_counter)
+            try:
+                client.publish("home/security/pir_count",mqtt_msg)
+            except Exception as e:
+                print("MQTT publish error:",e)
+
             lcd.backlight_on()
             lcd.clear()
             lcd.putstr("ALERT")
@@ -154,20 +161,35 @@ try:
             lcd.putstr("Security System")
             lcd.move_to(0, 1)
             lcd.putstr("OFF")
+            
+            try:
+                client.publish("home/security/state","OFF")
+            except Exception as e:
+                print("MQTT publish error:", e)
+            
             sleep(1)
             lcd.clear()
             lcd.backlight_off()
 
-        # --- WEB CLIENT ---
+        # --- WEB CLIENT (non-blocking) ---
         try:
             cl, addr = s.accept()
-            cl.recv(1024)
-            cl.send(generate_html("System Active"))
-            cl.close()
         except OSError:
-            pass
+            cl = None  # No client waiting
+
+        if cl:
+            try:
+                request = cl.recv(1024)  # read request
+                cl.send(generate_html(status_char))  # send static HTML
+            except OSError:
+                pass
+            finally:
+                cl.close()
+
 
         sleep(0.05)
+
+
 
 
 except KeyboardInterrupt:
