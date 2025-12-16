@@ -2,7 +2,7 @@ import network
 import uasyncio as asyncio
 from machine import Pin, PWM, I2C, unique_id
 import ubinascii
-from umqtt.robust import MQTTClient
+from umqtt.simple import MQTTClient
 import config
 import time
 from machine_i2c_lcd import I2cLcd
