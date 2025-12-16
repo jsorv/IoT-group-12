@@ -56,10 +56,10 @@ draw_box(ax, 7.25, 4.5, 2.5, 1.5, "HiveMQ Cloud\n(MQTT Broker)", color='#FFD700'
 draw_arrow(ax, 4.5, 5, 7.25, 5, "MQTT (TLS)\nWi-Fi", double=True) # Pico <-> Cloud
 
 
-# --- 3. APPLICATION LAYER ---
+# --- 3. Data Management LAYER ---
 # Background Area
 ax.add_patch(patches.Rectangle((11, 0.5), 4.5, 9, linewidth=1, edgecolor='gray', facecolor='#f0f0f0', linestyle='--'))
-ax.text(13.25, 9.2, "Application Layer", ha='center', fontsize=12, fontweight='bold')
+ax.text(13.25, 9.2, "Data Management Layer", ha='center', fontsize=12, fontweight='bold')
 
 # Nodes
 draw_box(ax, 12, 6, 2.5, 1.5, "Mobile App\n(Android)", color='#DDA0DD')
