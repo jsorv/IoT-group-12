@@ -4,7 +4,7 @@ import time
 import ssl
 import socket
 import ujson
-from machine import Pin, I2C
+from machine import Pin, SoftI2C # Changed from I2C to SoftI2C
 from umqtt.simple import MQTTClient
 from machine_i2c_lcd import I2cLcd
 import config
@@ -13,12 +13,9 @@ import config
 # 1. HARDWARE & CONSTANTS
 # ==========================================
 PIR_PIN = 28
-# SERVO_PIN removed
 BUZZER_PIN = 16
 LCD_SDA = 0
 LCD_SCL = 1
-
-# Servo constants removed
 
 DEBOUNCE_DELAY = 3  # Seconds between motion events
 LOCKOUT_LIMIT = 3   # Max failed attempts
@@ -38,12 +35,15 @@ last_motion_time = 0
 pir = Pin(PIR_PIN, Pin.IN, Pin.PULL_DOWN)
 buzzer = Pin(BUZZER_PIN, Pin.OUT)
 
-# Servo setup removed
+# --- CHANGED TO SoftI2C ---
+# SoftI2C works on any pins and avoids "bad SCL pin" errors
+# Note: We removed the '0' (id) from the arguments
+i2c = SoftI2C(sda=Pin(LCD_SDA), scl=Pin(LCD_SCL), freq=400000)
 
-i2c = I2C(0, sda=Pin(LCD_SDA), scl=Pin(LCD_SCL), freq=400000)
 try:
     lcd = I2cLcd(i2c, 0x27, 2, 16)
-except:
+except Exception as e:
+    print(f"LCD Init Error: {e}")
     lcd = None
 
 # ==========================================
@@ -51,18 +51,20 @@ except:
 # ==========================================
 def update_display(line1, line2=""):
     if lcd:
-        lcd.clear()
-        lcd.putstr(line1)
-        if line2:
-            lcd.move_to(0, 1)
-            lcd.putstr(line2)
+        try:
+            lcd.clear()
+            lcd.putstr(line1)
+            if line2:
+                lcd.move_to(0, 1)
+                lcd.putstr(line2)
+        except Exception as e:
+            print(f"LCD Write Error: {e}")
 
 def control_servo(position):
     """
     Simulates servo movement since hardware is missing.
     """
     print(f"[SIMULATION] Servo moved to: {position}")
-    # We removed the PWM duty cycle code here
 
 # ==========================================
 # 5. ASYNC TASKS

@@ -12,11 +12,11 @@ import config
 # ==========================================
 # 1. HARDWARE & CONSTANTS
 # ==========================================
-PIR_PIN = 28
+PIR_PIN = 7
 SERVO_PIN = 15
-BUZZER_PIN = 16
-LCD_SDA = 0
-LCD_SCL = 1
+BUZZER_PIN = 5
+LCD_SDA = 2
+LCD_SCL = 3
 
 SERVO_LOCKED = 1500
 SERVO_UNLOCKED = 8000
