@@ -26,12 +26,12 @@ LOCKOUT_LIMIT = 3   # Max failed attempts
 WARMUP_TIME = 20    # Seconds to wait for PIR to stabilize
 
 # MQTT Topics
-TOPIC_CMD = b"home/security/cmd"        # Incoming commands (UNLOCK, LOCK)
-TOPIC_COUNT = b"home/security/pir_count" # Outgoing intruder count
-TOPIC_AUTH = b"home/security/auth_count" # Outgoing authorized count (NEW)
-TOPIC_STATE = b"home/security/state"     # Outgoing system status
+TOPIC_CMD = b"home/security/cmd"        # Incoming
+TOPIC_COUNT = b"home/security/pir_count" # Outgoing
+TOPIC_AUTH = b"home/security/auth_count" # Outgoing (Authorized Count)
+TOPIC_STATE = b"home/security/state"     # Outgoing
 
-# LED Colors (R, G, B)
+# LED Colors
 COLOR_BLACK = (0, 0, 0)
 COLOR_RED   = (255, 0, 0)
 COLOR_GREEN = (0, 255, 0)
@@ -41,25 +41,21 @@ COLOR_YELLOW= (255, 150, 0)
 # ==========================================
 # 2. GLOBAL STATE
 # ==========================================
-# 0=DISARMED, 1=ARMED, 2=ALERT, 3=LOCKOUT
 current_state = 1
 failed_attempts = 0
 last_motion_time = 0
 intruder_count = 0
-authorized_count = 0 # <--- NEW COUNTER
+authorized_count = 0 
+client = None  # Defined globally to avoid NameError
 
 # ==========================================
 # 3. SETUP HARDWARE
 # ==========================================
-# PIR
 pir = Pin(PIR_PIN, Pin.IN, Pin.PULL_DOWN)
-
-# Buzzer
 buzzer = PWM(Pin(BUZZER_PIN))
 buzzer.freq(2000)
 buzzer.duty_u16(0)
 
-# LCD
 i2c = SoftI2C(sda=Pin(LCD_SDA), scl=Pin(LCD_SCL), freq=400000)
 try:
     lcd = I2cLcd(i2c, 0x27, 2, 16)
@@ -67,7 +63,6 @@ except Exception as e:
     print(f"LCD Init Error: {e}")
     lcd = None
 
-# WS2812 LED
 try:
     led = WS2812(LED_PIN, LED_COUNT)
 except Exception as e:
@@ -121,18 +116,16 @@ async def web_server():
             try:
                 conn, addr = s.accept()
                 request = conn.recv(1024)
+                # Basic status page
                 state_str = ["DISARMED", "ARMED", "ALERT", "LOCKOUT"][current_state]
                 response = f"""HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n
                 <!DOCTYPE html>
-                <html>
-                  <head><title>Security System</title></head>
-                  <body>
-                      <h1 style='color:red; text-align:center'>SECURITY ALARM SYSTEM</h1>
-                      <h2>Status: {state_str}</h2>
-                      <h3>Intruders: {intruder_count}</h3>
-                      <h3>Authorized Access: {authorized_count}</h3>
-                  </body>
-                </html>"""
+                <html><body>
+                  <h1>Security System</h1>
+                  <p>State: {state_str}</p>
+                  <p>Intruders: {intruder_count}</p>
+                  <p>Authorized: {authorized_count}</p>
+                </body></html>"""
                 conn.send(response)
                 conn.close()
             except OSError:
@@ -141,19 +134,22 @@ async def web_server():
     except Exception as e:
          print("Server Init Error:", e)
 
-async def mqtt_loop(client):
+async def mqtt_loop(client_instance):
     while True:
         try:
-            client.check_msg()
+            client_instance.check_msg()
         except OSError:
             print("MQTT Error")
         await asyncio.sleep(0.1)
 
 def mqtt_callback(topic, msg):
     global current_state, failed_attempts, intruder_count, authorized_count
-    cmd = msg.decode().upper()
-    print(f"[MQTT] Received: {cmd} on {topic}")
+    # Uses the global 'client' variable
     
+    cmd = msg.decode().upper()
+    print(f"[MQTT] Received: {cmd}")
+    
+    # --- ADMIN RESET ---
     if current_state == 3 and cmd == "ADMIN_RESET":
         failed_attempts = 0
         current_state = 1
@@ -161,27 +157,35 @@ def mqtt_callback(topic, msg):
         set_led(COLOR_BLUE)
         return
 
+    # --- UNLOCK / DISARM ---
     if cmd == "UNLOCK":
         failed_attempts = 0
         current_state = 0
         
-        # Increment Authorized Count
+        # 1. Increment Count
         authorized_count += 1
-        client.publish(TOPIC_AUTH, str(authorized_count).encode())
+        print(f"Authorized Count: {authorized_count}")
+        
+        # 2. Publish Count Update
+        if client:
+            client.publish(TOPIC_AUTH, str(authorized_count).encode())
+            client.publish(TOPIC_STATE, b'DISARMED')
         
         control_servo("UNLOCK")
         buzzer_off()
         set_led(COLOR_GREEN)
         update_display("DISARMED", "Access Granted")
-        client.publish(TOPIC_STATE, b'DISARMED')
         
+    # --- LOCK / ARM ---
     elif cmd == "LOCK":
         current_state = 1
         control_servo("LOCK")
         set_led(COLOR_BLUE)
         update_display("SYSTEM ARMED", "Monitoring...")
-        client.publish(TOPIC_STATE, b'ARMED')
+        if client:
+            client.publish(TOPIC_STATE, b'ARMED')
         
+    # --- BAD PIN ---
     elif cmd == "BAD_PIN":
         failed_attempts += 1
         update_display("INVALID PIN!", f"Attempts: {failed_attempts}/3")
@@ -194,44 +198,42 @@ def mqtt_callback(topic, msg):
             current_state = 3
             update_display("SYSTEM LOCKED", "Wait 60s...")
             set_led(COLOR_RED)
-            client.publish(TOPIC_STATE, b'LOCKOUT')
+            if client:
+                client.publish(TOPIC_STATE, b'LOCKOUT')
 
-async def sensor_loop(client):
+async def sensor_loop(client_instance):
     global current_state, last_motion_time, intruder_count
     
-    # --- WARM UP PHASE ---
+    # Warmup
     print("Starting PIR Warmup...")
     update_display("System Start", "Warming Sensor..")
     set_led(COLOR_YELLOW)
     
     for i in range(WARMUP_TIME):
-        if i % 5 == 0:
-            print(f"Warming up... {WARMUP_TIME - i}s")
+        if i % 5 == 0: print(f"Warming up... {WARMUP_TIME - i}s")
         await asyncio.sleep(1)
         
     print("PIR Ready.")
     update_display("SYSTEM ARMED", "Monitoring...")
     set_led(COLOR_BLUE)
     
-    # --- AUTO-RESET CONFIG ---
-    ALARM_DURATION = 5  # Alarm rings for 5 seconds
-    REARM_DELAY = 5     # Quiet for 5 seconds before re-arming
+    # Auto-Reset Vars
+    ALARM_DURATION = 5
+    REARM_DELAY = 5
     alert_start_time = 0
 
-    # --- MONITORING LOOP ---
     while True:
-        if current_state == 1: # ARMED
+        # ARMED CHECK
+        if current_state == 1: 
             if pir.value() == 1:
                 now = time.time()
                 if (now - last_motion_time) > DEBOUNCE_DELAY:
                     intruder_count += 1
-                    print(f"Motion Detected! Count: {intruder_count}")
+                    print(f"Motion! Intruder count: {intruder_count}")
                     
-                    try:
-                        client.publish(TOPIC_COUNT, str(intruder_count).encode())
-                        client.publish(TOPIC_STATE, b'INTRUDER')
-                    except Exception as e:
-                        print("Publish Error:", e)
+                    if client_instance:
+                        client_instance.publish(TOPIC_COUNT, str(intruder_count).encode())
+                        client_instance.publish(TOPIC_STATE, b'INTRUDER')
 
                     last_motion_time = now
                     current_state = 2 # ALERT
@@ -240,10 +242,9 @@ async def sensor_loop(client):
                     update_display("!! ALERT !!", f"Intruders: {intruder_count}")
                     set_led(COLOR_RED)
                     
-        # State Actions
-        if current_state == 2: # ALERT
+        # ALERT HANDLER
+        if current_state == 2: 
             if time.time() - alert_start_time > ALARM_DURATION:
-                # Auto-reset
                 buzzer_off()
                 update_display("Re-arming...", "Please Wait")
                 set_led(COLOR_YELLOW)
@@ -252,14 +253,16 @@ async def sensor_loop(client):
                 current_state = 1
                 update_display("SYSTEM ARMED", "Monitoring...")
                 set_led(COLOR_BLUE)
-                client.publish(TOPIC_STATE, b'ARMED')
+                if client_instance:
+                    client_instance.publish(TOPIC_STATE, b'ARMED')
             else:
                 buzzer_on()
                 await asyncio.sleep(0.5)
                 buzzer_off()
                 await asyncio.sleep(0.5)
-
-        elif current_state == 3: # LOCKOUT
+        
+        # LOCKOUT HANDLER
+        elif current_state == 3:
             buzzer_on()
             await asyncio.sleep(1)
             buzzer_off()
@@ -271,10 +274,10 @@ async def sensor_loop(client):
 # 6. MAIN SETUP
 # ==========================================
 async def main():
+    global client # UPDATE GLOBAL VARIABLE
     set_led(COLOR_YELLOW)
     update_display("Connecting...", "Wi-Fi")
     
-    # Wi-Fi
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     wlan.connect(config.ssid, config.pwd)
@@ -309,7 +312,7 @@ async def main():
             client.set_callback(mqtt_callback)
             client.connect()
             client.subscribe(TOPIC_CMD)
-            print(f"MQTT Connected.")
+            print("MQTT Connected.")
             
             # Start Tasks
             asyncio.create_task(web_server())
