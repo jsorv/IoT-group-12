@@ -2,6 +2,7 @@ from machine import Pin, PWM, ADC, SoftI2C
 from machine_i2c_lcd import I2cLcd
 from umqtt.simple import MQTTClient
 from time import sleep, time
+from ws2812 import WS2812
 import config
 import network
 import socket
@@ -61,6 +62,10 @@ client = MQTTClient(
 
 client.connect()
 
+# LED colors
+BLACK = (0, 0, 0)
+RED   = (255, 0, 0)
+GREEN = (0, 255, 0)
 
 # Define the LCD I2C address and dimensions
 I2C_ADDR = 0x27
@@ -79,6 +84,20 @@ lcd = I2cLcd(i2c, I2C_ADDR, I2C_NUM_ROWS, I2C_NUM_COLS)
 pwm = PWM(Pin(5))  # buzzer connected to A1
 pwm.freq(10000)
 servo_val = 10000
+led = WS2812(16, 30)   # GP16, 1 LED
+
+# LED helper functions
+def led_red():
+    led.pixels_fill(RED)
+    led.pixels_show()
+
+def led_green():
+    led.pixels_fill(GREEN)
+    led.pixels_show()
+
+def led_off():
+    led.pixels_fill(BLACK)
+    led.pixels_show()
 
 # PIR warm-up
 print("Warming up PIR...")
@@ -92,13 +111,12 @@ alert_start = 0
 motion_latched = False
 pir_counter = 0 #counter variable
 
-
-
 # Startup display
 lcd.putstr("Security System Active")
 sleep(2)
 lcd.clear()
 lcd.backlight_off()
+led_green()
 
 #HTML Code display
 status_char = "System Active"
@@ -144,6 +162,8 @@ try:
             except Exception as e:
                 print("MQTT publish error:",e)
 
+            led_red() #alert led
+            
             lcd.backlight_on()
             lcd.clear()
             lcd.putstr("ALERT")
@@ -166,6 +186,8 @@ try:
                 client.publish("home/security/state","OFF")
             except Exception as e:
                 print("MQTT publish error:", e)
+                
+            led_green() #system off
             
             sleep(1)
             lcd.clear()
