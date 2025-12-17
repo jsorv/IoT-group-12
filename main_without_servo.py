@@ -23,7 +23,7 @@ LED_COUNT = 30      # From your code
 # Constants
 DEBOUNCE_DELAY = 3  # Seconds between motion events
 LOCKOUT_LIMIT = 3   # Max failed attempts
-LOCKOUT_TIME = 60   # Seconds to lock system
+LOCKOUT_TIME = 10   # Seconds to lock system
 WARMUP_TIME = 20    # Seconds to wait for PIR to stabilize
 
 # LED Colors (R, G, B)
@@ -192,7 +192,6 @@ async def sensor_loop(client):
     update_display("System Start", "Warming Sensor..")
     set_led(COLOR_YELLOW)
     
-    # Wait for sensor to settle (20 seconds)
     for i in range(WARMUP_TIME):
         if i % 5 == 0:
             print(f"Warming up... {WARMUP_TIME - i}s")
@@ -202,6 +201,11 @@ async def sensor_loop(client):
     update_display("SYSTEM ARMED", "Monitoring...")
     set_led(COLOR_BLUE)
     
+    # --- AUTO-RESET CONFIG ---
+    ALARM_DURATION = 5  # Alarm rings for 5 seconds
+    REARM_DELAY = 5     # Quiet for 5 seconds before re-arming
+    alert_start_time = 0
+
     # --- MONITORING LOOP ---
     while True:
         if current_state == 1: # ARMED
@@ -211,6 +215,7 @@ async def sensor_loop(client):
                     print("Motion Detected!")
                     last_motion_time = now
                     current_state = 2 # ALERT
+                    alert_start_time = now # Capture time
                     
                     update_display("!! ALERT !!", "Intruder Detect")
                     set_led(COLOR_RED)
@@ -218,10 +223,28 @@ async def sensor_loop(client):
                     
         # State Actions
         if current_state == 2: # ALERT
-            buzzer_on()
-            await asyncio.sleep(0.5)
-            buzzer_off()
-            await asyncio.sleep(0.5)
+            # Check if we should stop beeping
+            if time.time() - alert_start_time > ALARM_DURATION:
+                # Timeout Reached: Stop Buzzer and Re-arm
+                buzzer_off()
+                update_display("Re-arming...", "Please Wait")
+                set_led(COLOR_YELLOW)
+                
+                # Wait for delay
+                await asyncio.sleep(REARM_DELAY)
+                
+                # Restore Armed State
+                current_state = 1
+                update_display("SYSTEM ARMED", "Monitoring...")
+                set_led(COLOR_BLUE)
+                client.publish(config.TOPIC_STATUS, b'{"status":"ARMED"}')
+            else:
+                # Normal beep pattern while active
+                buzzer_on()
+                await asyncio.sleep(0.5)
+                buzzer_off()
+                await asyncio.sleep(0.5)
+
         elif current_state == 3: # LOCKOUT
             buzzer_on()
             await asyncio.sleep(1)
@@ -270,7 +293,6 @@ async def main():
             # Start Tasks
             asyncio.create_task(web_server())
             asyncio.create_task(mqtt_loop(client))
-            # Sensor loop includes the warmup now
             asyncio.create_task(sensor_loop(client))
             
             while True:
