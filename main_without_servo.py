@@ -18,13 +18,17 @@ BUZZER_PIN = 5      # Buzzer
 LCD_SDA = 2         # I2C Data
 LCD_SCL = 3         # I2C Clock
 LED_PIN = 16        # Neopixel LED
-LED_COUNT = 30      # From your code
+LED_COUNT = 30      # LED Count
 
 # Constants
 DEBOUNCE_DELAY = 3  # Seconds between motion events
 LOCKOUT_LIMIT = 3   # Max failed attempts
-LOCKOUT_TIME = 10   # Seconds to lock system
 WARMUP_TIME = 20    # Seconds to wait for PIR to stabilize
+
+# MQTT Topics (Hardcoded as per request)
+TOPIC_CMD = b"home/security/cmd"        # Incoming commands (UNLOCK, LOCK)
+TOPIC_COUNT = b"home/security/pir_count" # Outgoing intruder count
+TOPIC_STATE = b"home/security/state"     # Outgoing system status
 
 # LED Colors (R, G, B)
 COLOR_BLACK = (0, 0, 0)
@@ -40,6 +44,7 @@ COLOR_YELLOW= (255, 150, 0)
 current_state = 1
 failed_attempts = 0
 last_motion_time = 0
+intruder_count = 0  # <--- NEW COUNTER
 
 # ==========================================
 # 3. SETUP HARDWARE
@@ -122,7 +127,7 @@ async def web_server():
                   <body>
                       <h1 style='color:red; text-align:center'>SECURITY ALARM SYSTEM</h1>
                       <h2>Status: {state_str}</h2>
-                      <h3>Failed Attempts: {failed_attempts}</h3>
+                      <h3>Intruders Detected: {intruder_count}</h3>
                   </body>
                 </html>"""
                 conn.send(response)
@@ -134,7 +139,6 @@ async def web_server():
          print("Server Init Error:", e)
 
 async def mqtt_loop(client):
-    global current_state, failed_attempts
     while True:
         try:
             client.check_msg()
@@ -143,15 +147,15 @@ async def mqtt_loop(client):
         await asyncio.sleep(0.1)
 
 def mqtt_callback(topic, msg):
-    global current_state, failed_attempts
+    global current_state, failed_attempts, intruder_count
     cmd = msg.decode().upper()
-    print(f"[MQTT] Received: {cmd}")
+    print(f"[MQTT] Received: {cmd} on {topic}")
     
     if current_state == 3 and cmd == "ADMIN_RESET":
         failed_attempts = 0
         current_state = 1
         update_display("SYSTEM RESET", "Attempts Cleared")
-        set_led(COLOR_BLUE) # Back to armed color
+        set_led(COLOR_BLUE)
         return
 
     if cmd == "UNLOCK":
@@ -161,14 +165,14 @@ def mqtt_callback(topic, msg):
         buzzer_off()
         set_led(COLOR_GREEN)
         update_display("DISARMED", "Access Granted")
-        client.publish(config.TOPIC_STATUS, b'{"status":"DISARMED"}')
+        client.publish(TOPIC_STATE, b'DISARMED')
         
     elif cmd == "LOCK":
         current_state = 1
         control_servo("LOCK")
         set_led(COLOR_BLUE)
         update_display("SYSTEM ARMED", "Monitoring...")
-        client.publish(config.TOPIC_STATUS, b'{"status":"ARMED"}')
+        client.publish(TOPIC_STATE, b'ARMED')
         
     elif cmd == "BAD_PIN":
         failed_attempts += 1
@@ -182,10 +186,10 @@ def mqtt_callback(topic, msg):
             current_state = 3
             update_display("SYSTEM LOCKED", "Wait 60s...")
             set_led(COLOR_RED)
-            client.publish(config.TOPIC_STATUS, b'{"status":"LOCKOUT"}')
+            client.publish(TOPIC_STATE, b'LOCKOUT')
 
 async def sensor_loop(client):
-    global current_state, last_motion_time
+    global current_state, last_motion_time, intruder_count
     
     # --- WARM UP PHASE ---
     print("Starting PIR Warmup...")
@@ -212,34 +216,38 @@ async def sensor_loop(client):
             if pir.value() == 1:
                 now = time.time()
                 if (now - last_motion_time) > DEBOUNCE_DELAY:
-                    print("Motion Detected!")
+                    # --- NEW COUNTER LOGIC ---
+                    intruder_count += 1
+                    print(f"Motion Detected! Count: {intruder_count}")
+                    
+                    # PUBLISH TO HIVE MQ
+                    try:
+                        client.publish(TOPIC_COUNT, str(intruder_count).encode())
+                        client.publish(TOPIC_STATE, b'INTRUDER')
+                    except Exception as e:
+                        print("Publish Error:", e)
+
                     last_motion_time = now
                     current_state = 2 # ALERT
-                    alert_start_time = now # Capture time
+                    alert_start_time = now 
                     
-                    update_display("!! ALERT !!", "Intruder Detect")
+                    update_display("!! ALERT !!", f"Intruders: {intruder_count}")
                     set_led(COLOR_RED)
-                    client.publish(config.TOPIC_STATUS, b'{"status":"INTRUDER"}')
                     
         # State Actions
         if current_state == 2: # ALERT
-            # Check if we should stop beeping
             if time.time() - alert_start_time > ALARM_DURATION:
-                # Timeout Reached: Stop Buzzer and Re-arm
+                # Auto-reset
                 buzzer_off()
                 update_display("Re-arming...", "Please Wait")
                 set_led(COLOR_YELLOW)
-                
-                # Wait for delay
                 await asyncio.sleep(REARM_DELAY)
                 
-                # Restore Armed State
                 current_state = 1
                 update_display("SYSTEM ARMED", "Monitoring...")
                 set_led(COLOR_BLUE)
-                client.publish(config.TOPIC_STATUS, b'{"status":"ARMED"}')
+                client.publish(TOPIC_STATE, b'ARMED')
             else:
-                # Normal beep pattern while active
                 buzzer_on()
                 await asyncio.sleep(0.5)
                 buzzer_off()
@@ -280,15 +288,23 @@ async def main():
         update_display("Wi-Fi OK", "Connecting MQTT")
         
         try:
+            # --- UPDATED MQTT CONNECTION CODE ---
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.verify_mode = ssl.CERT_NONE
-            client = MQTTClient(b"pico_id", config.MQTT_BROKER, port=8883, 
-                                user=config.MQTT_USER, password=config.MQTT_PWD, 
-                                ssl=context)
+
+            client = MQTTClient(
+                client_id=b'hello',
+                server=config.MQTT_BROKER,
+                port=config.MQTT_PORT,
+                user=config.MQTT_USER,
+                password=config.MQTT_PWD,
+                ssl=context
+            )
+            
             client.set_callback(mqtt_callback)
             client.connect()
-            client.subscribe(config.TOPIC_CONTROL)
-            print("MQTT Connected")
+            client.subscribe(TOPIC_CMD) # Subscribing to home/security/cmd
+            print(f"MQTT Connected. Listening on {TOPIC_CMD}")
             
             # Start Tasks
             asyncio.create_task(web_server())
