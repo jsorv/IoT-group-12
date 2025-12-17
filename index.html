@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home Security Controller</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Paho MQTT Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+    <style>
+        body { background-color: #f3f4f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .btn { transition: all 0.2s; }
+        .btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="flex flex-col items-center min-h-screen p-4">
+
+    <!-- Header -->
+    <div class="w-full max-w-md bg-white rounded-xl shadow-lg p-6 mb-4">
+        <h1 class="text-2xl font-bold text-gray-800 text-center mb-2">🛡️ Security System</h1>
+        
+        <!-- Connection Status -->
+        <div class="flex justify-center items-center gap-2 mb-4">
+            <div id="conn-dot" class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"></div>
+            <span id="conn-text" class="text-sm text-gray-500 font-medium">Connecting...</span>
+        </div>
+
+        <!-- System State Display -->
+        <div class="bg-gray-100 rounded-lg p-4 text-center mb-4 border border-gray-200">
+            <p class="text-xs text-gray-400 uppercase tracking-wider font-bold">System Status</p>
+            <h2 id="status-display" class="text-3xl font-black text-blue-600 mt-1">WAITING...</h2>
+        </div>
+
+        <!-- Intruder Counter -->
+        <div class="bg-red-50 rounded-lg p-4 text-center border border-red-100">
+            <p class="text-xs text-red-400 uppercase tracking-wider font-bold">Intruders Detected</p>
+            <h2 id="intruder-count" class="text-4xl font-black text-red-600 mt-1">0</h2>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="w-full max-w-md bg-white rounded-xl shadow-lg p-6">
+        
+        <!-- PIN Input -->
+        <div class="mb-6">
+            <label class="block text-gray-700 text-sm font-bold mb-2">Enter PIN Code</label>
+            <input type="tel" id="pin-input" placeholder="****" maxlength="4" 
+                   class="w-full text-center text-2xl tracking-widest p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors">
+        </div>
+
+        <!-- Buttons -->
+        <div class="grid grid-cols-2 gap-4">
+            <!-- Unlock Button -->
+            <button onclick="sendUnlock()" 
+                    class="btn bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-4 rounded-lg shadow-md flex flex-col items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                </svg>
+                DISARM
+            </button>
+
+            <!-- Lock Button -->
+            <button onclick="sendLock()" 
+                    class="btn bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-4 rounded-lg shadow-md flex flex-col items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                </svg>
+                ARM
+            </button>
+        </div>
+        
+        <p class="text-center text-xs text-gray-400 mt-6">Connected via HiveMQ Secure WebSocket</p>
+    </div>
+
+    <!-- Alert Modal (Hidden by default) -->
+    <div id="alert-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4 text-center">
+            <h3 class="text-xl font-bold text-red-600 mb-2">Access Denied!</h3>
+            <p class="text-gray-600 mb-4">The PIN you entered is incorrect.</p>
+            <button onclick="closeModal()" class="bg-gray-800 text-white px-6 py-2 rounded hover:bg-gray-700">OK</button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // HiveMQ Cloud WebSocket details
+        const host = "5b52a741d6104c309c63d2bf1884a717.s1.eu.hivemq.cloud";
+        const port = 8884; // WebSocket Secure Port (WSS)
+        const username = "jssuarezc"; 
+        const password = "dr34msc#m3trU3";
+        
+        const topicCmd = "home/security/cmd";
+        const topicState = "home/security/state";
+        const topicCount = "home/security/pir_count";
+
+        // Generate a random client ID
+        const clientId = "web_client_" + Math.random().toString(16).substr(2, 8);
+
+        // Create Client
+        const client = new Paho.MQTT.Client(host, port, clientId);
+
+        // --- CONNECTION LOGIC ---
+        function onConnect() {
+            console.log("Connected to HiveMQ!");
+            updateConnectionStatus(true);
+            
+            // Subscribe to updates
+            client.subscribe(topicState);
+            client.subscribe(topicCount);
+        }
+
+        function onFailure(responseObject) {
+            console.log("Connection Failed: " + responseObject.errorMessage);
+            updateConnectionStatus(false);
+            // Try to reconnect in 5 seconds
+            setTimeout(connectMQTT, 5000);
+        }
+
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("Connection Lost: " + responseObject.errorMessage);
+            }
+            updateConnectionStatus(false);
+        }
+
+        function connectMQTT() {
+            console.log("Attempting connection...");
+            const options = {
+                timeout: 3,
+                useSSL: true,
+                userName: username,
+                password: password,
+                onSuccess: onConnect,
+                onFailure: onFailure
+            };
+            client.connect(options);
+        }
+
+        // Set callbacks
+        client.onConnectionLost = onConnectionLost;
+        client.onMessageArrived = onMessageArrived;
+
+        // Start connection
+        connectMQTT();
+
+        // --- MESSAGE HANDLING ---
+        function onMessageArrived(message) {
+            const topic = message.destinationName;
+            const payload = message.payloadString;
+            console.log("Received: " + payload + " on " + topic);
+
+            if (topic === topicState) {
+                const display = document.getElementById("status-display");
+                display.innerText = payload;
+                
+                // Color coding
+                display.classList.remove("text-blue-600", "text-green-600", "text-red-600");
+                if (payload === "DISARMED") display.classList.add("text-green-600");
+                else if (payload === "ARMED") display.classList.add("text-blue-600");
+                else display.classList.add("text-red-600");
+
+            } else if (topic === topicCount) {
+                document.getElementById("intruder-count").innerText = payload;
+                // Animate the counter
+                const countDiv = document.getElementById("intruder-count").parentElement;
+                countDiv.classList.add("scale-105");
+                setTimeout(() => countDiv.classList.remove("scale-105"), 200);
+            }
+        }
+
+        function updateConnectionStatus(isConnected) {
+            const dot = document.getElementById("conn-dot");
+            const text = document.getElementById("conn-text");
+            if (isConnected) {
+                dot.classList.remove("bg-yellow-500", "bg-red-500");
+                dot.classList.add("bg-green-500");
+                text.innerText = "Connected";
+            } else {
+                dot.classList.remove("bg-green-500", "bg-yellow-500");
+                dot.classList.add("bg-red-500");
+                text.innerText = "Offline (Reconnecting...)";
+            }
+        }
+
+        // --- BUTTON ACTIONS ---
+        function publish(msg) {
+            if (client.isConnected()) {
+                message = new Paho.MQTT.Message(msg);
+                message.destinationName = topicCmd;
+                client.send(message);
+            } else {
+                alert("Not connected to server!");
+            }
+        }
+
+        function sendLock() {
+            publish("LOCK");
+            // Optimistic UI update
+            document.getElementById("status-display").innerText = "ARMING...";
+        }
+
+        function sendUnlock() {
+            const pin = document.getElementById("pin-input").value;
+            
+            if (pin === "1234") {
+                publish("UNLOCK");
+                document.getElementById("pin-input").value = ""; // Clear PIN
+            } else {
+                // Wrong PIN Logic
+                publish("BAD_PIN");
+                document.getElementById("pin-input").value = "";
+                showModal();
+            }
+        }
+
+        // --- MODAL UTILS ---
+        function showModal() {
+            document.getElementById("alert-modal").classList.remove("hidden");
+        }
+        function closeModal() {
+            document.getElementById("alert-modal").classList.add("hidden");
+        }
+    </script>
+</body>
+</html>
