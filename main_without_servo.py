@@ -25,9 +25,10 @@ DEBOUNCE_DELAY = 3  # Seconds between motion events
 LOCKOUT_LIMIT = 3   # Max failed attempts
 WARMUP_TIME = 20    # Seconds to wait for PIR to stabilize
 
-# MQTT Topics (Hardcoded as per request)
+# MQTT Topics
 TOPIC_CMD = b"home/security/cmd"        # Incoming commands (UNLOCK, LOCK)
 TOPIC_COUNT = b"home/security/pir_count" # Outgoing intruder count
+TOPIC_AUTH = b"home/security/auth_count" # Outgoing authorized count (NEW)
 TOPIC_STATE = b"home/security/state"     # Outgoing system status
 
 # LED Colors (R, G, B)
@@ -44,7 +45,8 @@ COLOR_YELLOW= (255, 150, 0)
 current_state = 1
 failed_attempts = 0
 last_motion_time = 0
-intruder_count = 0  # <--- NEW COUNTER
+intruder_count = 0
+authorized_count = 0 # <--- NEW COUNTER
 
 # ==========================================
 # 3. SETUP HARDWARE
@@ -127,7 +129,8 @@ async def web_server():
                   <body>
                       <h1 style='color:red; text-align:center'>SECURITY ALARM SYSTEM</h1>
                       <h2>Status: {state_str}</h2>
-                      <h3>Intruders Detected: {intruder_count}</h3>
+                      <h3>Intruders: {intruder_count}</h3>
+                      <h3>Authorized Access: {authorized_count}</h3>
                   </body>
                 </html>"""
                 conn.send(response)
@@ -147,7 +150,7 @@ async def mqtt_loop(client):
         await asyncio.sleep(0.1)
 
 def mqtt_callback(topic, msg):
-    global current_state, failed_attempts, intruder_count
+    global current_state, failed_attempts, intruder_count, authorized_count
     cmd = msg.decode().upper()
     print(f"[MQTT] Received: {cmd} on {topic}")
     
@@ -161,6 +164,11 @@ def mqtt_callback(topic, msg):
     if cmd == "UNLOCK":
         failed_attempts = 0
         current_state = 0
+        
+        # Increment Authorized Count
+        authorized_count += 1
+        client.publish(TOPIC_AUTH, str(authorized_count).encode())
+        
         control_servo("UNLOCK")
         buzzer_off()
         set_led(COLOR_GREEN)
@@ -216,11 +224,9 @@ async def sensor_loop(client):
             if pir.value() == 1:
                 now = time.time()
                 if (now - last_motion_time) > DEBOUNCE_DELAY:
-                    # --- NEW COUNTER LOGIC ---
                     intruder_count += 1
                     print(f"Motion Detected! Count: {intruder_count}")
                     
-                    # PUBLISH TO HIVE MQ
                     try:
                         client.publish(TOPIC_COUNT, str(intruder_count).encode())
                         client.publish(TOPIC_STATE, b'INTRUDER')
@@ -288,7 +294,6 @@ async def main():
         update_display("Wi-Fi OK", "Connecting MQTT")
         
         try:
-            # --- UPDATED MQTT CONNECTION CODE ---
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.verify_mode = ssl.CERT_NONE
 
@@ -303,8 +308,8 @@ async def main():
             
             client.set_callback(mqtt_callback)
             client.connect()
-            client.subscribe(TOPIC_CMD) # Subscribing to home/security/cmd
-            print(f"MQTT Connected. Listening on {TOPIC_CMD}")
+            client.subscribe(TOPIC_CMD)
+            print(f"MQTT Connected.")
             
             # Start Tasks
             asyncio.create_task(web_server())
