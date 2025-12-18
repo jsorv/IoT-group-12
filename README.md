@@ -1,34 +1,81 @@
 # Smart Intrusion Detection & Access Control System
 
-This project is an Intrusion Detection & Access Control System designed for the IoT course at the University of Oulu. The system utilizes a Raspberry Pi Pico W to detect unauthorized motion, triggering both local and remote alarms. It integrates a custom Android mobile application for real-time monitoring and remote control of a physical locking mechanism. The solution leverages the MQTT protocol for low-latency communication and cloud-based data logging for historical analysis, with Hive used for HTTPS display.
+**University of Oulu | 521290S Internet of Things (2025)**
 
-### Web App Link: [Smart Intrusion Detection System Web App](https://fahadibnefahian.com/iot/)
+## 📸 Project Overview
 
-## Architecture
+> **Note:** This project is a **Smart Intrusion Detection & Access Control System** developed using the **Raspberry Pi Pico W**.
 
-![IMAGE](images/architecture_diagram.png)
+It utilizes an End-to-End IoT architecture to process sensor data at the edge, detecting unauthorized access and communicating via the **MQTT protocol** to a custom **Web Application**. Unlike traditional passive alarms, this system offers real-time bidirectional control, allowing users to monitor status and remotely lock/unlock the system from anywhere via the cloud.
 
-# Setup
+[🔗 Live Web App Dashboard](https://fahadibnefahian.com/iot/) ---
 
-1. Open Thonny IDE and install packages for umqtt.simple and umqtt.robust.
-2. Create a server in Hive MQ.
-3. Edit all relevant info inside the .congfig file.
-4. Make sure to connect with your phone internet, stable WIFI connection.
+## Key Features
 
-## Usage
+- **Motion Detection:** Uses a PIR sensor with software-based signal debouncing to filter noise.
+- **Visual & Audio Feedback:** NeoPixel LED strip indicates system state along with buzzer alerts:
+  - 🟢 **Green:** Open
+  - 🔵 **Blue:** Armed
+  - 🔴 **Red:** Alarm
+  - 🟡 **Yellow:** Warmup/Lockout
+- **Remote Control:** A responsive Web App (HTML/Tailwind) connects to HiveMQ to control the device remotely.
+- **Security:** Implements a lockout mechanism (3 failed PIN attempts triggers a system lockdown).
+- **Asynchronous Multitasking:** Runs sensor polling, MQTT communication, and a local web server concurrently using `uasyncio`.
 
-### Wiring
+---
 
-![IMAGE](images/wiring.jpg)
+## 🏗️ Architecture
 
-1.
-2.
-3.
+The system follows a 4-layer IoT architecture:
+**Sensing (Edge) → Networking (MQTT) → Data Management → Application**
 
-4.
+- **Edge:** Raspberry Pi Pico W + Sensors/Actuators.
+- **Broker:** HiveMQ Cloud (SSL/TLS Encrypted).
+- **UI:** Web Application (HTML/JS/Tailwind).
 
-### Instructions
+---
 
-1.
-2.
-3.
+## 🔌 Hardware Wiring
+
+Based on the final firmware configuration (`main.py`), connect your components as follows:
+
+| Component        | Pico W Pin | Description                |
+| :--------------- | :--------- | :------------------------- |
+| **PIR Sensor**   | GP7        | Digital Input (Motion)     |
+| **Buzzer**       | GP5        | PWM Output (Alarm)         |
+| **NeoPixel LED** | GP16       | Data Input (Visual Status) |
+| **LCD SDA**      | GP2        | I2C Data                   |
+| **LCD SCL**      | GP3        | I2C Clock                  |
+| **VCC/GND**      | VBUS/GND   | Power rails (5V)           |
+
+---
+
+## 🛠️ Setup & Installation
+
+### 1. Prerequisites
+
+- **Thonny IDE** installed on your computer.
+- **MicroPython firmware** flashed onto the Raspberry Pi Pico W.
+- **HiveMQ Cloud** account (for the MQTT broker).
+
+### 2. Library Installation
+
+Open Thonny, go to **Tools > Manage Packages**, and install the following:
+
+- `micropython-umqtt.simple`
+
+**Note:** You also need to manually upload the following driver files to the Pico W (found in the `lib` folder of this repo):
+
+- `machine_i2c_lcd.py`
+- `lcd_api.py`
+- `ws2812.py` (Required for the NeoPixel LEDs)
+
+### 3. Configuration
+
+Create a file named config.py on the Pico W and add your credentials:
+ssid = "YOUR_WIFI_SSID"
+pwd = "YOUR_WIFI_PASSWORD"
+MQTT_BROKER = "your-cluster-url.s1.eu.hivemq.cloud"
+MQTT_PORT = 8883
+MQTT_USER = "your_mqtt_username"
+MQTT_PWD = "your_mqtt_password"
