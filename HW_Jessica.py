@@ -208,11 +208,7 @@ try:
             finally:
                 cl.close()
 
-
         sleep(0.05)
-
-
-
 
 except KeyboardInterrupt:
     lcd.backlight_off()
