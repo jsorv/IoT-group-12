@@ -10,6 +10,8 @@ It utilizes an End-to-End IoT architecture to process sensor data at the edge, d
 
 🔗[Live Web App Dashboard](https://fahadibnefahian.com/iot/)
 
+![Web Application Interface](images/Web_App_Intrusion_Detection_System.png)
+
 ## Key Features
 
 - **Motion Detection:** Uses a PIR sensor with software-based signal debouncing to filter noise.
