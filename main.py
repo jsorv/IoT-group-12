@@ -28,7 +28,7 @@ WARMUP_TIME = 20    # Seconds to wait for PIR to stabilize
 # MQTT Topics
 TOPIC_CMD = b"home/security/cmd"        # Incoming
 TOPIC_COUNT = b"home/security/pir_count" # Outgoing
-TOPIC_AUTH = b"home/security/auth_count" # Outgoing (Authorized Count)
+TOPIC_AUTH = b"home/security/auth_count" # Outgoing
 TOPIC_STATE = b"home/security/state"     # Outgoing
 
 # LED Colors
@@ -46,7 +46,7 @@ failed_attempts = 0
 last_motion_time = 0
 intruder_count = 0
 authorized_count = 0 
-client = None  # Defined globally to avoid NameError
+client = None 
 
 # ==========================================
 # 3. SETUP HARDWARE
@@ -134,17 +134,36 @@ async def web_server():
     except Exception as e:
          print("Server Init Error:", e)
 
+# --- FIXED MQTT LOOP WITH RECONNECT ---
 async def mqtt_loop(client_instance):
+    print("[MQTT] Loop started")
     while True:
         try:
+            # Check for new messages
             client_instance.check_msg()
-        except OSError:
-            print("MQTT Error")
-        await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1)
+        except OSError as e:
+            print(f"[MQTT] Connection Error: {e}")
+            print("[MQTT] Attempting Reconnect in 5s...")
+            
+            # Wait before retrying
+            await asyncio.sleep(5)
+            
+            try:
+                # Re-connect logic
+                client_instance.connect()
+                client_instance.subscribe(TOPIC_CMD)
+                print("[MQTT] Reconnected successfully!")
+                
+                # Update broker with current state upon reconnect
+                state_payload = b'ARMED' if current_state == 1 else b'DISARMED'
+                client_instance.publish(TOPIC_STATE, state_payload)
+                
+            except Exception as reconnect_e:
+                print(f"[MQTT] Reconnect failed: {reconnect_e}")
 
 def mqtt_callback(topic, msg):
     global current_state, failed_attempts, intruder_count, authorized_count
-    # Uses the global 'client' variable
     
     cmd = msg.decode().upper()
     print(f"[MQTT] Received: {cmd}")
@@ -166,10 +185,13 @@ def mqtt_callback(topic, msg):
         authorized_count += 1
         print(f"Authorized Count: {authorized_count}")
         
-        # 2. Publish Count Update
+        # [cite_start]2. Publish Count Update [cite: 5]
         if client:
-            client.publish(TOPIC_AUTH, str(authorized_count).encode())
-            client.publish(TOPIC_STATE, b'DISARMED')
+            try:
+                client.publish(TOPIC_AUTH, str(authorized_count).encode())
+                client.publish(TOPIC_STATE, b'DISARMED')
+            except OSError:
+                print("[MQTT] Failed to publish state")
         
         control_servo("UNLOCK")
         buzzer_off()
@@ -183,7 +205,10 @@ def mqtt_callback(topic, msg):
         set_led(COLOR_BLUE)
         update_display("SYSTEM ARMED", "Monitoring...")
         if client:
-            client.publish(TOPIC_STATE, b'ARMED')
+            try:
+                client.publish(TOPIC_STATE, b'ARMED')
+            except OSError:
+                print("[MQTT] Failed to publish state")
         
     # --- BAD PIN ---
     elif cmd == "BAD_PIN":
@@ -199,7 +224,10 @@ def mqtt_callback(topic, msg):
             update_display("SYSTEM LOCKED", "Wait 60s...")
             set_led(COLOR_RED)
             if client:
-                client.publish(TOPIC_STATE, b'LOCKOUT')
+                try:
+                    client.publish(TOPIC_STATE, b'LOCKOUT')
+                except OSError:
+                    pass
 
 async def sensor_loop(client_instance):
     global current_state, last_motion_time, intruder_count
@@ -209,15 +237,21 @@ async def sensor_loop(client_instance):
     update_display("System Start", "Warming Sensor..")
     set_led(COLOR_YELLOW)
     
+    # Simple non-blocking warmup
     for i in range(WARMUP_TIME):
         if i % 5 == 0: print(f"Warming up... {WARMUP_TIME - i}s")
         await asyncio.sleep(1)
         
     print("PIR Ready.")
-    update_display("SYSTEM ARMED", "Monitoring...")
-    set_led(COLOR_BLUE)
-    
-    # Auto-Reset Vars
+    # Set initial state
+    if current_state == 1:
+        update_display("SYSTEM ARMED", "Monitoring...")
+        set_led(COLOR_BLUE)
+    else:
+        update_display("DISARMED", "Access Granted")
+        set_led(COLOR_GREEN)
+
+    # Alarm Logic Vars
     ALARM_DURATION = 5
     REARM_DELAY = 5
     alert_start_time = 0
@@ -227,13 +261,17 @@ async def sensor_loop(client_instance):
         if current_state == 1: 
             if pir.value() == 1:
                 now = time.time()
+                # Use absolute value to avoid potential tick rollover issues (though rare in short run)
                 if (now - last_motion_time) > DEBOUNCE_DELAY:
                     intruder_count += 1
                     print(f"Motion! Intruder count: {intruder_count}")
                     
                     if client_instance:
-                        client_instance.publish(TOPIC_COUNT, str(intruder_count).encode())
-                        client_instance.publish(TOPIC_STATE, b'INTRUDER')
+                        try:
+                            client_instance.publish(TOPIC_COUNT, str(intruder_count).encode())
+                            client_instance.publish(TOPIC_STATE, b'INTRUDER')
+                        except OSError:
+                            print("[MQTT] Failed to publish Alarm")
 
                     last_motion_time = now
                     current_state = 2 # ALERT
@@ -254,7 +292,10 @@ async def sensor_loop(client_instance):
                 update_display("SYSTEM ARMED", "Monitoring...")
                 set_led(COLOR_BLUE)
                 if client_instance:
-                    client_instance.publish(TOPIC_STATE, b'ARMED')
+                    try:
+                        client_instance.publish(TOPIC_STATE, b'ARMED')
+                    except OSError:
+                        pass
             else:
                 buzzer_on()
                 await asyncio.sleep(0.5)
@@ -274,7 +315,7 @@ async def sensor_loop(client_instance):
 # 6. MAIN SETUP
 # ==========================================
 async def main():
-    global client # UPDATE GLOBAL VARIABLE
+    global client 
     set_led(COLOR_YELLOW)
     update_display("Connecting...", "Wi-Fi")
     
@@ -292,21 +333,24 @@ async def main():
     if wlan.status() != 3:
         update_display("WiFi Failed", "Check Config")
         set_led(COLOR_RED)
+        print("WiFi Connection Failed")
     else:
         print(f"Connected: {wlan.ifconfig()[0]}")
         update_display("Wi-Fi OK", "Connecting MQTT")
         
         try:
+            # SSL Context for HiveMQ
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.verify_mode = ssl.CERT_NONE
 
             client = MQTTClient(
-                client_id=b'hello',
+                client_id=b'pico_w_client',
                 server=config.MQTT_BROKER,
                 port=config.MQTT_PORT,
                 user=config.MQTT_USER,
                 password=config.MQTT_PWD,
-                ssl=context
+                ssl=context,
+                keepalive=60 
             )
             
             client.set_callback(mqtt_callback)
@@ -324,8 +368,10 @@ async def main():
         except Exception as e:
             print("Init Error:", e)
             update_display("MQTT Error", "Check Broker")
+            # Even if init fails, we loop to keep the device alive (maybe retry later)
+            while True: await asyncio.sleep(1)
 
 try:
     asyncio.run(main())
 except Exception as e:
-    print("Error:", e)
+    print("Fatal Error:", e)
