@@ -15,6 +15,12 @@ import config
 # ==========================================
 PIR_PIN = 7         # PIR Sensor
 BUZZER_PIN = 5      # Buzzer
+# Stepper Motor Pins (ULN2003 Driver)
+IN1_PIN = 18
+IN2_PIN = 19
+IN3_PIN = 20
+IN4_PIN = 21
+
 LCD_SDA = 2         # I2C Data
 LCD_SCL = 3         # I2C Clock
 LED_PIN = 16        # Neopixel LED
@@ -26,9 +32,9 @@ LOCKOUT_LIMIT = 3   # Max failed attempts
 WARMUP_TIME = 20    # Seconds to wait for PIR to stabilize
 
 # MQTT Topics
-TOPIC_CMD = b"home/security/cmd"        # Incoming
+TOPIC_CMD = b"home/security/cmd"         # Incoming
 TOPIC_COUNT = b"home/security/pir_count" # Outgoing
-TOPIC_AUTH = b"home/security/auth_count" # Outgoing (Authorized Count)
+TOPIC_AUTH = b"home/security/auth_count" # Outgoing
 TOPIC_STATE = b"home/security/state"     # Outgoing
 
 # LED Colors
@@ -46,16 +52,41 @@ failed_attempts = 0
 last_motion_time = 0
 intruder_count = 0
 authorized_count = 0 
-client = None  # Defined globally to avoid NameError
+client = None  # Global MQTT client variable
+is_locked = True # Track physical lock state
 
 # ==========================================
 # 3. SETUP HARDWARE
 # ==========================================
+# PIR
 pir = Pin(PIR_PIN, Pin.IN, Pin.PULL_DOWN)
+
+# Buzzer
 buzzer = PWM(Pin(BUZZER_PIN))
 buzzer.freq(2000)
 buzzer.duty_u16(0)
 
+# Stepper Motor Setup
+stepper_pins = [
+    Pin(IN1_PIN, Pin.OUT),
+    Pin(IN2_PIN, Pin.OUT),
+    Pin(IN3_PIN, Pin.OUT),
+    Pin(IN4_PIN, Pin.OUT)
+]
+
+# Half-step sequence for 28BYJ-48 (8 steps)
+step_sequence = [
+    [1, 0, 0, 0],
+    [1, 1, 0, 0],
+    [0, 1, 0, 0],
+    [0, 1, 1, 0],
+    [0, 0, 1, 0],
+    [0, 0, 1, 1],
+    [0, 0, 0, 1],
+    [1, 0, 0, 1]
+]
+
+# LCD
 i2c = SoftI2C(sda=Pin(LCD_SDA), scl=Pin(LCD_SCL), freq=400000)
 try:
     lcd = I2cLcd(i2c, 0x27, 2, 16)
@@ -63,6 +94,7 @@ except Exception as e:
     print(f"LCD Init Error: {e}")
     lcd = None
 
+# LED
 try:
     led = WS2812(LED_PIN, LED_COUNT)
 except Exception as e:
@@ -94,8 +126,38 @@ def update_display(line1, line2=""):
         except:
             pass
 
-def control_servo(position):
-    print(f"[SIMULATION] Servo moved to: {position}")
+def rotate_stepper(direction):
+    """
+    Rotates the stepper motor approx 90 degrees.
+    direction: 1 for Open (Clockwise), -1 for Close (Counter-Clockwise)
+    """
+    global is_locked
+    
+    # Don't try to lock if already locked, or open if already open
+    if direction == 1 and not is_locked:
+        return
+    if direction == -1 and is_locked:
+        return
+
+    print(f"[STEPPER] Moving {'Unlock' if direction == 1 else 'Lock'}...")
+    
+    # 28BYJ-48 is approx 4096 steps per revolution (half-step)
+    # 90 degrees = ~1024 steps
+    steps_to_move = 1024 
+    
+    for _ in range(steps_to_move):
+        for step in step_sequence if direction == 1 else reversed(step_sequence):
+            for i in range(4):
+                stepper_pins[i].value(step[i])
+            time.sleep_us(1000) # Speed control (1ms delay)
+            
+    # Turn off coils to save power and stop heating
+    for pin in stepper_pins:
+        pin.value(0)
+        
+    # Update logic state
+    is_locked = (direction == -1)
+    print("[STEPPER] Done.")
 
 # ==========================================
 # 5. ASYNC TASKS
@@ -116,7 +178,6 @@ async def web_server():
             try:
                 conn, addr = s.accept()
                 request = conn.recv(1024)
-                # Basic status page
                 state_str = ["DISARMED", "ARMED", "ALERT", "LOCKOUT"][current_state]
                 response = f"""HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n
                 <!DOCTYPE html>
@@ -144,7 +205,6 @@ async def mqtt_loop(client_instance):
 
 def mqtt_callback(topic, msg):
     global current_state, failed_attempts, intruder_count, authorized_count
-    # Uses the global 'client' variable
     
     cmd = msg.decode().upper()
     print(f"[MQTT] Received: {cmd}")
@@ -155,6 +215,7 @@ def mqtt_callback(topic, msg):
         current_state = 1
         update_display("SYSTEM RESET", "Attempts Cleared")
         set_led(COLOR_BLUE)
+        rotate_stepper(-1) # Lock
         return
 
     # --- UNLOCK / DISARM ---
@@ -162,16 +223,12 @@ def mqtt_callback(topic, msg):
         failed_attempts = 0
         current_state = 0
         
-        # 1. Increment Count
         authorized_count += 1
-        print(f"Authorized Count: {authorized_count}")
-        
-        # 2. Publish Count Update
         if client:
             client.publish(TOPIC_AUTH, str(authorized_count).encode())
             client.publish(TOPIC_STATE, b'DISARMED')
         
-        control_servo("UNLOCK")
+        rotate_stepper(1) # Open (1)
         buzzer_off()
         set_led(COLOR_GREEN)
         update_display("DISARMED", "Access Granted")
@@ -179,7 +236,7 @@ def mqtt_callback(topic, msg):
     # --- LOCK / ARM ---
     elif cmd == "LOCK":
         current_state = 1
-        control_servo("LOCK")
+        rotate_stepper(-1) # Close (-1)
         set_led(COLOR_BLUE)
         update_display("SYSTEM ARMED", "Monitoring...")
         if client:
@@ -198,6 +255,7 @@ def mqtt_callback(topic, msg):
             current_state = 3
             update_display("SYSTEM LOCKED", "Wait 60s...")
             set_led(COLOR_RED)
+            rotate_stepper(-1) # Ensure locked
             if client:
                 client.publish(TOPIC_STATE, b'LOCKOUT')
 
@@ -207,6 +265,8 @@ async def sensor_loop(client_instance):
     # Warmup
     print("Starting PIR Warmup...")
     update_display("System Start", "Warming Sensor..")
+    # Ensure motor is in locked position at start
+    rotate_stepper(-1) 
     set_led(COLOR_YELLOW)
     
     for i in range(WARMUP_TIME):
@@ -274,7 +334,7 @@ async def sensor_loop(client_instance):
 # 6. MAIN SETUP
 # ==========================================
 async def main():
-    global client # UPDATE GLOBAL VARIABLE
+    global client
     set_led(COLOR_YELLOW)
     update_display("Connecting...", "Wi-Fi")
     

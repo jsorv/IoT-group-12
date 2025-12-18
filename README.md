@@ -5,7 +5,8 @@ This project is an Intrusion Detection & Access Control System designed for the 
 ### Web App Link: [Smart Intrusion Detection System Web App](https://fahadibnefahian.com/iot/)
 
 ## Architecture
-![IMAGE](architecture_diagram.png)
+
+![IMAGE](images/architecture_diagram.png)
 
 # Setup
 
@@ -14,22 +15,20 @@ This project is an Intrusion Detection & Access Control System designed for the 
 3. Edit all relevant info inside the .congfig file.
 4. Make sure to connect with your phone internet, stable WIFI connection.
 
-
-
 ## Usage
+
 ### Wiring
-![IMAGE](wiring.jpg)
-1. 
-2. 
+
+![IMAGE](images/wiring.jpg)
+
+1.
+2.
 3.
 
-4. 
-
-
+4.
 
 ### Instructions
 
-1. 
-2. 
-3. 
-
+1.
+2.
+3.
