@@ -8,7 +8,7 @@
 
 It utilizes an End-to-End IoT architecture to process sensor data at the edge, detecting unauthorized access and communicating via the **MQTT protocol** to a custom **Web Application**. Unlike traditional passive alarms, this system offers real-time bidirectional control, allowing users to monitor status and remotely lock/unlock the system from anywhere via the cloud.
 
-[🔗 Live Web App Dashboard](https://fahadibnefahian.com/iot/) ---
+🔗[Live Web App Dashboard](https://fahadibnefahian.com/iot/)
 
 ## Key Features
 
