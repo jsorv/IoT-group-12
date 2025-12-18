@@ -22,8 +22,6 @@ It utilizes an End-to-End IoT architecture to process sensor data at the edge, d
 - **Security:** Implements a lockout mechanism (3 failed PIN attempts triggers a system lockdown).
 - **Asynchronous Multitasking:** Runs sensor polling, MQTT communication, and a local web server concurrently using `uasyncio`.
 
----
-
 ## 🏗️ Architecture
 
 The system follows a 4-layer IoT architecture:
@@ -33,7 +31,7 @@ The system follows a 4-layer IoT architecture:
 - **Broker:** HiveMQ Cloud (SSL/TLS Encrypted).
 - **UI:** Web Application (HTML/JS/Tailwind).
 
----
+![Architecture Diagram](images/architecture_diagram.png)
 
 ## 🔌 Hardware Wiring
 
@@ -48,7 +46,7 @@ Based on the final firmware configuration (`main.py`), connect your components a
 | **LCD SCL**      | GP3        | I2C Clock                  |
 | **VCC/GND**      | VBUS/GND   | Power rails (5V)           |
 
----
+![Wiring Diagram](images/wiring.jpg)
 
 ## 🛠️ Setup & Installation
 
@@ -72,10 +70,10 @@ Open Thonny, go to **Tools > Manage Packages**, and install the following:
 
 ### 3. Configuration
 
-Create a file named config.py on the Pico W and add your credentials:
-ssid = "YOUR_WIFI_SSID"
-pwd = "YOUR_WIFI_PASSWORD"
-MQTT_BROKER = "your-cluster-url.s1.eu.hivemq.cloud"
-MQTT_PORT = 8883
-MQTT_USER = "your_mqtt_username"
-MQTT_PWD = "your_mqtt_password"
+- Create a file named config.py on the Pico W and add your credentials:
+- ssid = "YOUR_WIFI_SSID"
+- pwd = "YOUR_WIFI_PASSWORD"
+- MQTT_BROKER = "your-cluster-url.s1.eu.hivemq.cloud"
+- MQTT_PORT = 8883
+- MQTT_USER = "your_mqtt_username"
+- MQTT_PWD = "your_mqtt_password"
