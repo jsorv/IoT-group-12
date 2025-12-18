@@ -16,7 +16,7 @@ It utilizes an End-to-End IoT architecture to process sensor data at the edge, d
 
 - **Motion Detection:** Uses a PIR sensor with software-based signal debouncing to filter noise.
 - **Visual & Audio Feedback:** NeoPixel LED strip indicates system state along with buzzer alerts:
-  - 🟢 **Green:** Open
+  - 🟢 **Green:** Access Granted
   - 🔵 **Blue:** Armed
   - 🔴 **Red:** Alarm
   - 🟡 **Yellow:** Warmup/Lockout
