@@ -63,12 +63,13 @@ Based on the final firmware configuration (`main.py`), connect your components a
 Open Thonny, go to **Tools > Manage Packages**, and install the following:
 
 - `micropython-umqtt.simple`
+- `micropython-umqtt.robust`
 
 **Note:** You also need to manually upload the following driver files to the Pico W (found in the `lib` folder of this repo):
 
 - `machine_i2c_lcd.py`
 - `lcd_api.py`
-- `ws2812.py` (Required for the NeoPixel LEDs)
+- `ws2812.py` (Required for the RGB LEDs)
 
 ### 3. Configuration
 
